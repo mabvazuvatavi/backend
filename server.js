@@ -12,7 +12,7 @@ const app = express();
 const server = http.createServer(app);
 
 /* =======================
-   CORS CONFIG (RENDER SAFE)
+   CORS CONFIG (RENDER + GRAPHQL SAFE)
 ======================= */
 const allowedOrigins = [
   'https://frontend-jha2.onrender.com',
@@ -22,24 +22,43 @@ const allowedOrigins = [
   'http://127.0.0.1:3500'
 ];
 
-app.use(cors({
+const corsOptions = {
   origin(origin, callback) {
-    if (!origin) return callback(null, true); // Postman / server-to-server
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
+    // Allow server-to-server, mobile apps, Render health checks
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    console.warn('🚫 CORS blocked origin:', origin);
+
+    // Allow all in non-prod (dev, staging)
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+
+    return callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-}));
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // PRE-FLIGHT FIX
 
 /* =======================
-   SOCKET.IO
+   SOCKET.IO (MATCH EXPRESS CORS)
 ======================= */
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
-    methods: ['GET', 'POST'],
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (process.env.NODE_ENV !== 'production') return callback(null, true);
+      return callback(null, false);
+    },
     credentials: true
   }
 });
@@ -48,7 +67,7 @@ const io = new Server(server, {
    SECURITY & LOGGING
 ======================= */
 app.use(helmet());
-app.use(morgan('combined'));
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 /* =======================
    BODY PARSING
@@ -57,16 +76,15 @@ app.use((req, res, next) => {
   if (req.path === '/api/media/upload') return next();
   express.json({ limit: '50mb' })(req, res, next);
 });
-
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 /* =======================
-   STATIC FILES (Local uploads fallback)
+   STATIC FILES
 ======================= */
 app.use('/uploads', express.static('uploads'));
 
 /* =======================
-   RATE LIMITING (PROD)
+   RATE LIMITING (PROD ONLY)
 ======================= */
 if (process.env.NODE_ENV === 'production') {
   app.use(rateLimit({
@@ -83,7 +101,7 @@ if (process.env.NODE_ENV === 'production') {
 require('./config/database');
 
 /* =======================
-   ROUTES
+   ROUTES (MVC KEPT CLEAN)
 ======================= */
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
@@ -104,7 +122,7 @@ app.use('/api/admin/approvals', require('./routes/approvals'));
 app.use('/api/payouts', require('./routes/payouts'));
 app.use('/api/emails', require('./routes/emailNotifications'));
 
-// Unified Booking System Routes
+// Unified Booking System
 app.use('/api/products', require('./routes/products'));
 app.use('/api/bookings', require('./routes/bookings'));
 app.use('/api/vendors', require('./routes/vendors'));
@@ -119,11 +137,12 @@ app.use('/api/flights', require('./routes/flights'));
 app.use('/api', require('./routes/settings'));
 
 /* =======================
-   HEALTH CHECK
+   HEALTH CHECK (RENDER SAFE)
 ======================= */
 app.get('/health', (req, res) => {
-  res.json({
+  res.status(200).json({
     status: 'OK',
+    service: 'Backend API',
     env: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString()
   });
@@ -133,7 +152,7 @@ app.get('/health', (req, res) => {
    SOCKET EVENTS
 ======================= */
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  console.log('🔌 Socket connected:', socket.id);
 
   socket.on('join-event', (eventId) => {
     socket.join(`event-${eventId}`);
@@ -144,7 +163,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+    console.log('❌ Socket disconnected:', socket.id);
   });
 });
 
@@ -152,10 +171,10 @@ io.on('connection', (socket) => {
    ERROR HANDLING
 ======================= */
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('🔥 ERROR:', err.message);
   res.status(500).json({
     success: false,
-    message: 'Something went wrong',
+    message: 'Internal server error',
     error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
@@ -178,4 +197,3 @@ server.listen(PORT, HOST, () => {
 });
 
 module.exports = { app, server, io };
-
