@@ -12,33 +12,37 @@ const app = express();
 const server = http.createServer(app);
 
 /* =======================
-   CORS CONFIG (RENDER + GRAPHQL SAFE)
+   ORIGINS (ENV DRIVEN)
 ======================= */
 const allowedOrigins = [
-  'https://frontend-jha2.onrender.com',
+  process.env.FRONTEND_BASE_URL,
+  ...(process.env.FRONTEND_BASE_URLS
+    ? process.env.FRONTEND_BASE_URLS.split(',')
+    : []),
   'http://localhost:3000',
   'http://localhost:3500',
   'http://localhost:3501',
   'http://127.0.0.1:3500'
-];
+].filter(Boolean);
 
+/* =======================
+   CORS CONFIG (RENDER + GRAPHQL SAFE)
+======================= */
 const corsOptions = {
   origin(origin, callback) {
-    // Allow server-to-server, mobile apps, Render health checks
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
-    console.warn('🚫 CORS blocked origin:', origin);
+    console.warn('🚫 CORS blocked:', origin);
 
-    // Allow all in non-prod (dev, staging)
     if (process.env.NODE_ENV !== 'production') {
       return callback(null, true);
     }
 
-    return callback(null, false);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -46,22 +50,16 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // PRE-FLIGHT FIX
+app.options('*', cors(corsOptions));
+
 
 /* =======================
    SOCKET.IO (MATCH EXPRESS CORS)
 ======================= */
 const io = new Server(server, {
-  cors: {
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      if (process.env.NODE_ENV !== 'production') return callback(null, true);
-      return callback(null, false);
-    },
-    credentials: true
-  }
+  cors: corsOptions
 });
+
 
 /* =======================
    SECURITY & LOGGING
