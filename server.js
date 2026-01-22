@@ -15,7 +15,7 @@ const server = http.createServer(app);
    CORS CONFIG (RENDER SAFE)
 ======================= */
 const allowedOrigins = [
-  'https://frontend-o0q7.onrender.com',
+  'https://frontend-jha2.onrender.com',
   'http://localhost:3000',
   'http://localhost:3500',
   'http://localhost:3501',
